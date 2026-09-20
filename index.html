@@ -1,504 +1,1004 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RFID Attendance System | Live Dashboard</title>
-    <!-- Firebase + Font Awesome + Google Fonts -->
-    <script type="module">
-        // Firebase SDK (modular v9+)
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-        import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RFID Attendance System | Pro Dashboard</title>
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
 
-        // Your Firebase configuration (from your ESP32 code)
-        const firebaseConfig = {
-            apiKey: "AIzaSyAkyoQwZuEw67JTjD-5dDrtWwgNgsD0igY",
-            databaseURL: "https://attendance-system-b93a6-default-rtdb.asia-southeast1.firebasedatabase.app/"
-        };
+    // ============ FIREBASE CONFIG ============
+    const firebaseConfig = {
+        apiKey: "AIzaSyAkyoQwZuEw67JTjD-5dDrtWwgNgsD0igY",
+        databaseURL: "https://attendance-system-b93a6-default-rtdb.asia-southeast1.firebasedatabase.app/"
+    };
 
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const studentStatusRef = ref(db, 'student_status');
 
-        // Reference to student_status node
-        const studentStatusRef = ref(db, 'student_status');
+    // ============ STATE ============
+    let allStudents = [];
+    let previousStatuses = {}; // track changes for notifications
+    let firstLoad = true;
+    let soundEnabled = true;
+    let charts = {};
 
-        // DOM elements
-        const tableBody = document.getElementById('studentTableBody');
-        const loadingDiv = document.getElementById('loadingIndicator');
-        const lastUpdatedSpan = document.getElementById('lastUpdated');
-        const totalStudentsSpan = document.getElementById('totalStudents');
-        const presentCountSpan = document.getElementById('presentCount');
-        const leaveCountSpan = document.getElementById('leaveCount');
+    // ============ DOM ============
+    const tableBody = document.getElementById('studentTableBody');
+    const loadingDiv = document.getElementById('loadingIndicator');
+    const lastUpdatedSpan = document.getElementById('lastUpdated');
+    const totalStudentsSpan = document.getElementById('totalStudents');
+    const presentCountSpan = document.getElementById('presentCount');
+    const leaveCountSpan = document.getElementById('leaveCount');
+    const searchInput = document.getElementById('searchInput');
+    const filterSelect = document.getElementById('filterSelect');
+    const toastContainer = document.getElementById('toastContainer');
+    const emptyState = document.getElementById('emptyState');
 
-        // Status summary counters
-        let total = 0, present = 0, leave = 0;
+    // ============ CLOCK ============
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('liveClock').textContent = now.toLocaleTimeString('en-IN', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+        });
+        document.getElementById('liveDate').textContent = now.toLocaleDateString('en-IN', {
+            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
 
-        // Real-time listener
-        onValue(studentStatusRef, (snapshot) => {
-            const data = snapshot.val();
-            // Hide loading, show table
-            loadingDiv.style.display = 'none';
+    // ============ DARK MODE ============
+    const themeToggle = document.getElementById('themeToggle');
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    if (savedTheme === 'dark') document.body.classList.add('dark');
+    updateThemeIcon();
 
-            if (!data) {
-                // No data yet: show empty message
-                tableBody.innerHTML = `<tr><td colspan="7" class="empty-message">No student records found. Scan an RFID card.</td></tr>`;
-                totalStudentsSpan.textContent = '0';
-                presentCountSpan.textContent = '0';
-                leaveCountSpan.textContent = '0';
-                lastUpdatedSpan.textContent = new Date().toLocaleTimeString();
-                return;
+    themeToggle.addEventListener('click', () => {
+        document.body.classList.toggle('dark');
+        const isDark = document.body.classList.contains('dark');
+        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+        updateThemeIcon();
+        if (charts.statusChart) updateChartColors();
+    });
+
+    function updateThemeIcon() {
+        const isDark = document.body.classList.contains('dark');
+        themeToggle.innerHTML = isDark
+            ? '<i class="fas fa-sun"></i>'
+            : '<i class="fas fa-moon"></i>';
+    }
+
+    // ============ SOUND ============
+    function playBeep(type = 'success') {
+        if (!soundEnabled) return;
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            if (type === 'success') {
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                osc.start(); osc.stop(ctx.currentTime + 0.3);
+            } else if (type === 'leave') {
+                osc.frequency.setValueAtTime(600, ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(400, ctx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+                osc.start(); osc.stop(ctx.currentTime + 0.35);
             }
+        } catch (e) { console.warn('Audio error:', e); }
+    }
 
-            // Convert object to array
-            const students = Object.values(data);
-            total = students.length;
-            present = students.filter(s => s.status === 'PRESENT').length;
-            leave = students.filter(s => s.status === 'LEAVE').length;
+    document.getElementById('soundToggle').addEventListener('click', (e) => {
+        soundEnabled = !soundEnabled;
+        e.currentTarget.innerHTML = soundEnabled
+            ? '<i class="fas fa-volume-up"></i>'
+            : '<i class="fas fa-volume-mute"></i>';
+        e.currentTarget.classList.toggle('muted', !soundEnabled);
+    });
 
-            // Update summary cards
-            totalStudentsSpan.textContent = total;
-            presentCountSpan.textContent = present;
-            leaveCountSpan.textContent = leave;
+    // ============ TOAST ============
+    function showToast(title, message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        const icons = {
+            success: 'fa-check-circle',
+            error: 'fa-exclamation-circle',
+            info: 'fa-info-circle',
+            warning: 'fa-exclamation-triangle'
+        };
+        toast.innerHTML = `
+            <i class="fas ${icons[type]}"></i>
+            <div class="toast-content">
+                <div class="toast-title">${title}</div>
+                <div class="toast-message">${message}</div>
+            </div>
+            <button class="toast-close"><i class="fas fa-times"></i></button>
+        `;
+        toastContainer.appendChild(toast);
+        setTimeout(() => toast.classList.add('show'), 10);
 
-            // Build table rows
-            let rows = '';
-            // Sort by studentID for consistent order
-            students.sort((a, b) => (a.studentID || '').localeCompare(b.studentID || ''));
-
-            students.forEach(student => {
-                // Determine status class and icon
-                const isPresent = student.status === 'PRESENT';
-                const statusClass = isPresent ? 'status-present' : 'status-leave';
-                const statusIcon = isPresent ? 'fa-check-circle' : 'fa-clock';
-                const statusText = student.status || 'UNKNOWN';
-
-                rows += `
-                    <tr>
-                        <td data-label="Student ID"><span class="student-id">${student.studentID || '—'}</span></td>
-                        <td data-label="Name"><span class="student-name">${student.name || '—'}</span></td>
-                        <td data-label="UID"><code class="uid">${student.uid || '—'}</code></td>
-                        <td data-label="Date">${student.date || '—'}</td>
-                        <td data-label="Time">${student.time || '—'}</td>
-                        <td data-label="Day">${student.day || '—'}</td>
-                        <td data-label="Status">
-                            <span class="status-badge ${statusClass}">
-                                <i class="fas ${statusIcon}"></i> ${statusText}
-                            </span>
-                        </td>
-                    </tr>
-                `;
-            });
-
-            tableBody.innerHTML = rows;
-            lastUpdatedSpan.textContent = new Date().toLocaleTimeString();
-        }, (error) => {
-            console.error("Firebase read error:", error);
-            loadingDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Error loading data: ${error.message}`;
-            loadingDiv.style.color = '#b91c1c';
+        toast.querySelector('.toast-close').addEventListener('click', () => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
         });
 
-        // Also show current time in footer (optional)
-        setInterval(() => {
-            const now = new Date();
-            document.getElementById('footerTime').textContent = now.toLocaleTimeString();
-        }, 1000);
-    </script>
+        setTimeout(() => {
+            if (toast.parentElement) {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }
+        }, 5000);
+    }
 
-    <!-- Font Awesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    // ============ RENDER TABLE ============
+    function getInitials(name) {
+        if (!name) return '?';
+        return name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+    }
+
+    function getAvatarColor(name) {
+        const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316',
+                        '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6'];
+        let hash = 0;
+        for (let i = 0; i < (name || '').length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        return colors[Math.abs(hash) % colors.length];
+    }
+
+    function renderStudents(students) {
+        if (!students.length) {
+            tableBody.innerHTML = '';
+            emptyState.style.display = 'flex';
+            return;
+        }
+        emptyState.style.display = 'none';
+
+        let rows = '';
+        students.forEach(student => {
+            const isPresent = student.status === 'PRESENT';
+            const statusClass = isPresent ? 'status-present' : 'status-leave';
+            const statusIcon = isPresent ? 'fa-check-circle' : 'fa-clock';
+            const statusText = student.status || 'UNKNOWN';
+            const initials = getInitials(student.name);
+            const avatarBg = getAvatarColor(student.name);
+
+            rows += `
+                <tr data-status="${student.status || ''}">
+                    <td data-label="Student">
+                        <div class="student-cell">
+                            <div class="avatar" style="background:${avatarBg}">${initials}</div>
+                            <div>
+                                <div class="student-name">${student.name || '—'}</div>
+                                <div class="student-id-sub">${student.studentID || '—'}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td data-label="RFID UID"><code class="uid">${student.uid || '—'}</code></td>
+                    <td data-label="Date">${student.date || '—'}</td>
+                    <td data-label="Time"><i class="far fa-clock"></i> ${student.time || '—'}</td>
+                    <td data-label="Day">${student.day || '—'}</td>
+                    <td data-label="Status">
+                        <span class="status-badge ${statusClass}">
+                            <i class="fas ${statusIcon}"></i> ${statusText}
+                        </span>
+                    </td>
+                </tr>
+            `;
+        });
+        tableBody.innerHTML = rows;
+    }
+
+    // ============ FILTER & SEARCH ============
+    function applyFilters() {
+        const query = searchInput.value.toLowerCase().trim();
+        const filter = filterSelect.value;
+
+        let filtered = allStudents.filter(s => {
+            const matchSearch = !query ||
+                (s.name || '').toLowerCase().includes(query) ||
+                (s.studentID || '').toLowerCase().includes(query) ||
+                (s.uid || '').toLowerCase().includes(query);
+            const matchFilter = filter === 'all' || s.status === filter;
+            return matchSearch && matchFilter;
+        });
+
+        filtered.sort((a, b) => (a.studentID || '').localeCompare(b.studentID || ''));
+        renderStudents(filtered);
+    }
+
+    searchInput.addEventListener('input', applyFilters);
+    filterSelect.addEventListener('change', applyFilters);
+
+    // ============ EXPORT CSV ============
+    document.getElementById('exportBtn').addEventListener('click', () => {
+        if (!allStudents.length) {
+            showToast('No Data', 'There are no records to export.', 'warning');
+            return;
+        }
+        const headers = ['Student ID', 'Name', 'RFID UID', 'Date', 'Time', 'Day', 'Status'];
+        const rows = allStudents.map(s => [
+            s.studentID || '', s.name || '', s.uid || '',
+            s.date || '', s.time || '', s.day || '', s.status || ''
+        ]);
+        const csv = [headers, ...rows]
+            .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+            .join('\n');
+
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `attendance_${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+        showToast('Exported', 'Attendance report downloaded.', 'success');
+    });
+
+    // ============ REFRESH ============
+    document.getElementById('refreshBtn').addEventListener('click', (e) => {
+        const icon = e.currentTarget.querySelector('i');
+        icon.classList.add('spin');
+        setTimeout(() => icon.classList.remove('spin'), 1000);
+        showToast('Synced', 'Data refreshed from Firebase.', 'info');
+    });
+
+    // ============ CHARTS ============
+    function updateCharts() {
+        const ctx = document.getElementById('statusChart').getContext('2d');
+        const isDark = document.body.classList.contains('dark');
+        const textColor = isDark ? '#e2e8f0' : '#334155';
+
+        if (charts.statusChart) charts.statusChart.destroy();
+
+        charts.statusChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Present', 'On Leave'],
+                datasets: [{
+                    data: [present, leave],
+                    backgroundColor: ['#22c55e', '#f59e0b'],
+                    borderWidth: 0,
+                    hoverOffset: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '70%',
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: textColor, padding: 15, font: { size: 12, weight: '600' } }
+                    },
+                    tooltip: {
+                        backgroundColor: isDark ? '#1e293b' : '#0f172a',
+                        padding: 12,
+                        titleFont: { size: 13 },
+                        bodyFont: { size: 12 }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateChartColors() {
+        const isDark = document.body.classList.contains('dark');
+        const textColor = isDark ? '#e2e8f0' : '#334155';
+        if (charts.statusChart) {
+            charts.statusChart.options.plugins.legend.labels.color = textColor;
+            charts.statusChart.update();
+        }
+    }
+
+    // ============ FIREBASE LISTENER ============
+    onValue(studentStatusRef, (snapshot) => {
+        const data = snapshot.val();
+        loadingDiv.style.display = 'none';
+
+        if (!data) {
+            allStudents = [];
+            totalStudentsSpan.textContent = '0';
+            presentCountSpan.textContent = '0';
+            leaveCountSpan.textContent = '0';
+            applyFilters();
+            updateCharts();
+            lastUpdatedSpan.textContent = new Date().toLocaleTimeString();
+            return;
         }
 
-        body {
-            background: #f1f5f9;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            padding: 2rem 1rem;
+        allStudents = Object.values(data);
+        const total = allStudents.length;
+        const present = allStudents.filter(s => s.status === 'PRESENT').length;
+        const leave = allStudents.filter(s => s.status === 'LEAVE').length;
+
+        totalStudentsSpan.textContent = total;
+        presentCountSpan.textContent = present;
+        leaveCountSpan.textContent = leave;
+
+        // Detect changes and show toasts
+        if (!firstLoad) {
+            allStudents.forEach(s => {
+                const key = s.studentID;
+                const prev = previousStatuses[key];
+                if (prev && prev !== s.status) {
+                    const type = s.status === 'PRESENT' ? 'success' : 'warning';
+                    const title = s.status === 'PRESENT' ? '✅ Present' : '🕐 On Leave';
+                    showToast(title, `${s.name || key} • ${s.time || ''}`, type);
+                    playBeep(s.status === 'PRESENT' ? 'success' : 'leave');
+                }
+            });
+        } else {
+            showToast('Connected', 'Live attendance data synced.', 'info');
+            firstLoad = false;
         }
 
-        .dashboard {
-            max-width: 1400px;
-            width: 100%;
-            background: white;
-            border-radius: 2rem;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-            padding: 2rem 2rem 1.5rem;
-        }
+        // Save statuses
+        previousStatuses = {};
+        allStudents.forEach(s => { previousStatuses[s.studentID] = s.status; });
 
-        /* Header */
-        .header {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: 2rem;
-            flex-wrap: wrap;
-            justify-content: space-between;
-        }
+        applyFilters();
+        updateCharts();
+        lastUpdatedSpan.textContent = new Date().toLocaleTimeString();
+    }, (error) => {
+        console.error("Firebase error:", error);
+        loadingDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Connection error: ${error.message}`;
+        loadingDiv.style.color = '#ef4444';
+        showToast('Connection Error', error.message, 'error');
+    });
+</script>
 
-        .title-section {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
+<!-- Font Awesome -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-        .title-section i {
-            font-size: 2.2rem;
-            color: #0f172a;
-            background: #e2e8f0;
-            padding: 0.7rem;
-            border-radius: 1.2rem;
-        }
+<style>
+    :root {
+        --bg: #f1f5f9;
+        --card-bg: #ffffff;
+        --text: #0f172a;
+        --text-secondary: #64748b;
+        --border: #e2e8f0;
+        --hover: #f8fafc;
+        --shadow: 0 4px 6px -2px rgba(0,0,0,0.05), 0 10px 15px -3px rgba(0,0,0,0.05);
+        --shadow-lg: 0 25px 50px -12px rgba(0,0,0,0.15);
+        --accent: #3b82f6;
+        --success: #22c55e;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+        --input-bg: #f8fafc;
+    }
 
-        .title-section h1 {
-            font-size: 1.9rem;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            color: #0f172a;
-        }
+    body.dark {
+        --bg: #0b1120;
+        --card-bg: #1e293b;
+        --text: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border: #334155;
+        --hover: #334155;
+        --shadow: 0 4px 6px -2px rgba(0,0,0,0.3), 0 10px 15px -3px rgba(0,0,0,0.3);
+        --shadow-lg: 0 25px 50px -12px rgba(0,0,0,0.5);
+        --input-bg: #0f172a;
+    }
 
-        .title-section .subhead {
-            font-size: 0.85rem;
-            color: #475569;
-            font-weight: 500;
-            letter-spacing: 0.3px;
-            margin-top: 0.2rem;
-        }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        .live-badge {
-            background: #dcfce7;
-            color: #166534;
-            font-weight: 600;
-            font-size: 0.85rem;
-            padding: 0.5rem 1rem;
-            border-radius: 2rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            border: 1px solid #bbf7d0;
-        }
+    body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        padding: 1.5rem 1rem;
+        transition: background 0.3s, color 0.3s;
+    }
 
-        .live-badge i {
-            font-size: 0.65rem;
-            animation: pulse 1.5s infinite;
-        }
+    .dashboard {
+        max-width: 1500px;
+        margin: 0 auto;
+        background: var(--card-bg);
+        border-radius: 2rem;
+        box-shadow: var(--shadow-lg);
+        padding: 2rem;
+        transition: background 0.3s;
+    }
 
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.4; }
-            100% { opacity: 1; }
-        }
+    /* ===== HEADER ===== */
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+    }
 
-        /* Summary cards */
-        .stats-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 1.2rem;
-            margin-bottom: 2.2rem;
-        }
+    .brand {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
 
-        .stat-card {
-            background: white;
-            border-radius: 1.5rem;
-            padding: 1.2rem 1.5rem;
-            box-shadow: 0 4px 6px -2px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.05);
-            border: 1px solid #e2e8f0;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: all 0.2s ease;
-        }
+    .brand-icon {
+        width: 60px;
+        height: 60px;
+        background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+        border-radius: 1.2rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 1.7rem;
+        box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4);
+    }
 
-        .stat-card:hover {
-            border-color: #cbd5e1;
-            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.1);
-        }
+    .brand h1 {
+        font-size: 1.7rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+    }
 
-        .stat-left h3 {
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #64748b;
-            font-weight: 600;
-            margin-bottom: 0.3rem;
-        }
+    .brand .subhead {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+        margin-top: 0.15rem;
+    }
 
-        .stat-left .value {
-            font-size: 2.1rem;
-            font-weight: 800;
-            color: #0f172a;
-            line-height: 1;
-        }
+    .header-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+    }
 
-        .stat-icon {
-            width: 3rem;
-            height: 3rem;
-            border-radius: 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.4rem;
-            background: #f1f5f9;
-            color: #1e293b;
-        }
+    .live-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: rgba(34, 197, 94, 0.12);
+        color: var(--success);
+        padding: 0.55rem 1rem;
+        border-radius: 2rem;
+        font-weight: 600;
+        font-size: 0.8rem;
+        border: 1px solid rgba(34, 197, 94, 0.2);
+    }
 
-        .stat-icon.present {
-            background: #dcfce7;
-            color: #15803d;
-        }
+    .live-indicator .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--success);
+        animation: pulse 1.5s infinite;
+    }
 
-        .stat-icon.leave {
-            background: #fff3cd;
-            color: #b45309;
-        }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.85); }
+    }
 
-        /* Table */
-        .table-container {
-            border-radius: 1.5rem;
-            border: 1px solid #e2e8f0;
-            overflow-x: auto;
-            background: white;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-        }
+    .icon-btn {
+        width: 42px;
+        height: 42px;
+        border-radius: 0.9rem;
+        background: var(--input-bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        transition: all 0.2s;
+    }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 900px;
-            font-size: 0.9rem;
-        }
+    .icon-btn:hover {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+        transform: translateY(-2px);
+    }
 
-        thead {
-            background: #f8fafc;
-            border-bottom: 1px solid #e2e8f0;
-        }
+    .icon-btn.muted {
+        background: rgba(239, 68, 68, 0.12);
+        color: var(--danger);
+        border-color: rgba(239, 68, 68, 0.2);
+    }
 
-        th {
-            text-align: left;
-            padding: 1rem 1.2rem;
-            font-weight: 600;
-            color: #334155;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            white-space: nowrap;
-        }
+    .icon-btn i.spin {
+        animation: spin 1s linear;
+    }
 
-        td {
-            padding: 1rem 1.2rem;
-            border-bottom: 1px solid #f1f5f9;
-            color: #1e293b;
-            vertical-align: middle;
-        }
+    @keyframes spin {
+        from { transform: rotate(0); }
+        to { transform: rotate(360deg); }
+    }
 
-        tr:last-child td {
-            border-bottom: none;
-        }
+    .clock-widget {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        padding: 0.5rem 1rem;
+        background: var(--input-bg);
+        border-radius: 0.9rem;
+        border: 1px solid var(--border);
+    }
 
-        tbody tr:hover {
-            background: #f8fafc;
-        }
+    .clock-time {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+    }
 
-        .student-id {
-            font-weight: 700;
-            color: #0f172a;
-            background: #f1f5f9;
-            padding: 0.2rem 0.6rem;
-            border-radius: 0.5rem;
-            font-size: 0.8rem;
-            display: inline-block;
-        }
+    .clock-date {
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
 
-        .student-name {
-            font-weight: 600;
-            color: #0f172a;
-        }
+    /* ===== STATS CARDS ===== */
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.2rem;
+        margin-bottom: 1.5rem;
+    }
 
-        .uid {
-            font-family: 'SF Mono', 'Fira Code', monospace;
-            font-size: 0.8rem;
-            background: #f1f5f9;
-            padding: 0.2rem 0.6rem;
-            border-radius: 0.5rem;
-            color: #334155;
-            letter-spacing: 0.3px;
-        }
+    .stat-card {
+        background: var(--card-bg);
+        border-radius: 1.5rem;
+        padding: 1.3rem 1.5rem;
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        transition: all 0.25s;
+        position: relative;
+        overflow: hidden;
+    }
 
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.3rem 0.9rem;
-            border-radius: 2rem;
-            font-weight: 600;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-            white-space: nowrap;
-        }
+    .stat-card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0;
+        width: 4px; height: 100%;
+        background: var(--accent);
+    }
 
-        .status-present {
-            background: #dcfce7;
-            color: #15803d;
-            border: 1px solid #bbf7d0;
-        }
+    .stat-card.present::before { background: var(--success); }
+    .stat-card.leave::before { background: var(--warning); }
+    .stat-card.total::before { background: var(--accent); }
 
-        .status-leave {
-            background: #fef9c3;
-            color: #854d0e;
-            border: 1px solid #fde68a;
-        }
+    .stat-card:hover {
+        transform: translateY(-3px);
+        box-shadow: var(--shadow);
+    }
 
-        .status-badge i {
-            font-size: 0.75rem;
-        }
+    .stat-label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-secondary);
+        font-weight: 600;
+        margin-bottom: 0.35rem;
+    }
 
-        .empty-message {
-            text-align: center;
-            padding: 3rem !important;
-            color: #64748b;
-            font-style: italic;
-        }
+    .stat-value {
+        font-size: 2.2rem;
+        font-weight: 800;
+        line-height: 1;
+        color: var(--text);
+        font-variant-numeric: tabular-nums;
+    }
 
-        #loadingIndicator {
-            text-align: center;
-            padding: 3rem;
-            color: #475569;
-            font-size: 1rem;
-        }
+    .stat-icon {
+        width: 3.2rem;
+        height: 3.2rem;
+        border-radius: 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        background: rgba(59, 130, 246, 0.12);
+        color: var(--accent);
+    }
 
-        #loadingIndicator i {
-            margin-right: 0.5rem;
-            color: #3b82f6;
-        }
+    .stat-icon.present { background: rgba(34, 197, 94, 0.12); color: var(--success); }
+    .stat-icon.leave { background: rgba(245, 158, 11, 0.12); color: var(--warning); }
 
-        /* Footer */
-        .footer {
-            margin-top: 1.5rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.8rem;
-            color: #64748b;
-            flex-wrap: wrap;
-            gap: 0.8rem;
-            padding-top: 1rem;
-            border-top: 1px solid #e2e8f0;
-        }
+    /* ===== CHART SECTION ===== */
+    .chart-section {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 1.2rem;
+        margin-bottom: 1.5rem;
+    }
 
-        .footer i {
-            color: #3b82f6;
-            margin-right: 0.3rem;
-        }
+    .chart-card {
+        background: var(--card-bg);
+        border-radius: 1.5rem;
+        border: 1px solid var(--border);
+        padding: 1.2rem;
+    }
 
-        .footer .last-updated {
-            background: #f1f5f9;
-            padding: 0.3rem 0.8rem;
-            border-radius: 2rem;
-            font-weight: 500;
-        }
+    .chart-card h3 {
+        font-size: 0.9rem;
+        font-weight: 700;
+        margin-bottom: 0.8rem;
+        color: var(--text);
+    }
 
-        /* Responsive */
-        @media (max-width: 640px) {
-            body { padding: 0.8rem; }
-            .dashboard { padding: 1.5rem 1rem; border-radius: 1.5rem; }
-            .header { flex-direction: column; align-items: flex-start; }
-            .title-section h1 { font-size: 1.5rem; }
-            .stats-row { grid-template-columns: 1fr 1fr; gap: 0.8rem; }
-            .stat-card { padding: 1rem; }
-            .stat-left .value { font-size: 1.8rem; }
-        }
-    </style>
-</head>
-<body>
-    <div class="dashboard">
-        <!-- Header -->
-        <div class="header">
-            <div class="title-section">
-                <i class="fas fa-id-card"></i>
-                <div>
-                    <h1>RFID Attendance</h1>
-                    <div class="subhead">Live dashboard • ESP32 + Firebase</div>
-                </div>
-            </div>
-            <div class="live-badge">
-                <i class="fas fa-circle"></i> LIVE UPDATES
-            </div>
-        </div>
+    .chart-container {
+        position: relative;
+        height: 200px;
+    }
 
-        <!-- Stats cards -->
-        <div class="stats-row">
-            <div class="stat-card">
-                <div class="stat-left">
-                    <h3>Total Students</h3>
-                    <div class="value" id="totalStudents">—</div>
-                </div>
-                <div class="stat-icon">
-                    <i class="fas fa-users"></i>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-left">
-                    <h3>Present</h3>
-                    <div class="value" id="presentCount">—</div>
-                </div>
-                <div class="stat-icon present">
-                    <i class="fas fa-check-circle"></i>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-left">
-                    <h3>On Leave</h3>
-                    <div class="value" id="leaveCount">—</div>
-                </div>
-                <div class="stat-icon leave">
-                    <i class="fas fa-clock"></i>
-                </div>
-            </div>
-        </div>
+    /* ===== TOOLBAR ===== */
+    .toolbar {
+        display: flex;
+        gap: 0.8rem;
+        align-items: center;
+        margin-bottom: 1.2rem;
+        flex-wrap: wrap;
+    }
 
-        <!-- Table -->
-        <div class="table-container">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Student ID</th>
-                        <th>Name</th>
-                        <th>RFID UID</th>
-                        <th>Date</th>
-                        <th>Time</th>
-                        <th>Day</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody id="studentTableBody">
-                    <!-- Data will be populated by JavaScript -->
-                </tbody>
-            </table>
-            <div id="loadingIndicator">
-                <i class="fas fa-spinner fa-pulse"></i> Loading attendance data...
-            </div>
-        </div>
+    .search-box {
+        position: relative;
+        flex: 1;
+        min-width: 220px;
+    }
 
-        <!-- Footer -->
-        <div class="footer">
-            <div>
-                <i class="fas fa-database"></i> Real-time sync from Firebase Realtime DB
-            </div>
-            <div class="last-updated">
-                <i class="fas fa-sync-alt"></i> Last updated: <span id="lastUpdated">—</span>
-            </div>
-        </div>
-        <div class="footer" style="border-top: none; padding-top: 0; margin-top: 0.2rem; font-size: 0.7rem; color: #94a3b8;">
-            <div><i class="far fa-clock"></i> <span id="footerTime">—</span></div>
-            <div>RFID Attendance System • ESP32</div>
-        </div>
-    </div>
-</body>
-</html>
+    .search-box i {
+        position: absolute;
+        left: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+    }
+
+    .search-box input {
+        width: 100%;
+        padding: 0.75rem 1rem 0.75rem 2.5rem;
+        background: var(--input-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.9rem;
+        color: var(--text);
+        font-size: 0.9rem;
+        transition: all 0.2s;
+        font-family: inherit;
+    }
+
+    .search-box input:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    .filter-select {
+        padding: 0.75rem 1rem;
+        background: var(--input-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.9rem;
+        color: var(--text);
+        font-size: 0.9rem;
+        cursor: pointer;
+        font-family: inherit;
+        font-weight: 500;
+    }
+
+    .filter-select:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+    .btn {
+        padding: 0.75rem 1.2rem;
+        border-radius: 0.9rem;
+        border: none;
+        font-weight: 600;
+        font-size: 0.85rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.2s;
+        font-family: inherit;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background: #2563eb;
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px -5px rgba(59, 130, 246, 0.4);
+    }
+
+    /* ===== TABLE ===== */
+    .table-container {
+        border-radius: 1.5rem;
+        border: 1px solid var(--border);
+        overflow: hidden;
+        background: var(--card-bg);
+        position: relative;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+    }
+
+    thead {
+        background: var(--input-bg);
+        border-bottom: 1px solid var(--border);
+    }
+
+    th {
+        text-align: left;
+        padding: 1rem 1.2rem;
+        font-weight: 700;
+        color: var(--text-secondary);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+    }
+
+    td {
+        padding: 0.9rem 1.2rem;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+    }
+
+    tbody tr {
+        transition: background 0.15s;
+    }
+
+    tbody tr:hover {
+        background: var(--hover);
+    }
+
+    tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .student-cell {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+    }
+
+    .avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 700;
+        font-size: 0.85rem;
+        flex-shrink: 0;
+        box-shadow: 0 4px 10px -2px rgba(0,0,0,0.15);
+    }
+
+    .student-name {
+        font-weight: 700;
+        color: var(--text);
+        font-size: 0.92rem;
+    }
+
+    .student-id-sub {
+        font-size: 0.72rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+        margin-top: 0.1rem;
+    }
+
+    .uid {
+        font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+        font-size: 0.78rem;
+        background: var(--input-bg);
+        padding: 0.25rem 0.7rem;
+        border-radius: 0.5rem;
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+    }
+
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.4rem 0.9rem;
+        border-radius: 2rem;
+        font-weight: 700;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        white-space: nowrap;
+    }
+
+    .status-present {
+        background: rgba(34, 197, 94, 0.12);
+        color: var(--success);
+        border: 1px solid rgba(34, 197, 94, 0.25);
+    }
+
+    .status-leave {
+        background: rgba(245, 158, 11, 0.12);
+        color: var(--warning);
+        border: 1px solid rgba(245, 158, 11, 0.25);
+    }
+
+    td i.far, td i.fas {
+        margin-right: 0.3rem;
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+    }
+
+    /* ===== EMPTY STATE ===== */
+    #emptyState {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 1rem;
+        color: var(--text-secondary);
+        text-align: center;
+    }
+
+    #emptyState i {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        color: var(--border);
+    }
+
+    #emptyState h3 {
+        font-size: 1.1rem;
+        margin-bottom: 0.3rem;
+        color: var(--text);
+    }
+
+    #emptyState p {
+        font-size: 0.85rem;
+    }
+
+    #loadingIndicator {
+        text-align: center;
+        padding: 3rem;
+        color: var(--text-secondary);
+        font-size: 1rem;
+    }
+
+    #loadingIndicator i {
+        margin-right: 0.5rem;
+        color: var(--accent);
+    }
+
+    /* ===== FOOTER ===== */
+    .footer {
+        margin-top: 1.5rem;
+        padding-top: 1.2rem;
+        border-top: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.8rem;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+
+    .footer-info {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+
+    .footer-badge {
+        background: var(--input-bg);
+        padding: 0.35rem 0.85rem;
+        border-radius: 2rem;
+        font-weight: 600;
+        border: 1px solid var(--border);
+    }
+
+    /* ===== TOASTS ===== */
+    #toastContainer {
+        position: fixed;
+        top: 1.5rem;
+        right: 1.5rem;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+        max-width: 350px;
+    }
+
+    .toast {
+        background: var(--card-bg);
+        border-radius: 1rem;
+        padding: 1rem 1.2rem;
+        box-shadow: var(--shadow-lg);
+        display: flex;
+        align-items: flex-start;
+        gap: 0.8rem;
+        border-left: 4px solid var(--accent);
+        transform: translateX(120%);
+        opacity: 0;
+        transition: all 0.35s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+        min-width: 280px;
+    }
+
+    .toast.show {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    .toast-success { border-left-color: var(--success); }
+    .toast-error { border-left-color: var(--danger); }
+    .toast-warning { border-left-color: var(--warning); }
+    .toast-info { border-left-color: var(--accent); }
+
+    .toast > i:first-child {
+        font-size: 1.2rem;
+        margin-top: 0.15rem;
+    }
+
+    .toast-success > i:first-child { color: var(--success); }
+    .toast-error > i:first-child { color: var(--danger); }
+    .toast-warning > i:first-child { color: var(--warning); }
+    .toast-info > i:first-child { color: var(--accent); }
+
+    .toast-content { flex: 1; }
+    .toast-title {
+        font-weight: 700;
+        font-size: 0.88rem;
+        color: var(--text);
+        margin-bottom: 0.15rem;
+    }
+    .toast-message {
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        line-height: 1.4;
+    }
+
+    .toast-close {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0.2rem;
+        font-size: 0.8rem;
+        transition: color 0.2s;
+    }
+    .toast-close:hover { color: var(--danger); }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 900px) {
+        .chart-section { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 768px) {
+        body { padding: 0.5rem; }
+        .dashboard { padding: 1.2rem; border-radius: 1.2rem; }
+        .brand h1 { font-size: 1.3rem; }
+        .brand-icon { width: 48px; height: 48px; font-size: 1.3rem; }
+        .clock-widget { display: none; }
+        .stats-row { grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+        .stat-card { padding: 1rem; }
+        .stat-value { font-size: 1.6rem; }
+        .stat-icon { width: 2.5rem; height: 2.5rem; font-size: 1
