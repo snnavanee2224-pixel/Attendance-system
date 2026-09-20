@@ -1,0 +1,936 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>RFID Attendance System</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      background: #f4f7fb;
+      color: #1f2937;
+    }
+
+    /* ================= HEADER ================= */
+
+    header {
+      background: #111827;
+      color: white;
+      padding: 18px 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+    }
+
+    .logo {
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: #cbd5e1;
+      margin-top: 4px;
+    }
+
+    .firebase-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+    }
+
+    .status-dot {
+      width: 11px;
+      height: 11px;
+      background: #22c55e;
+      border-radius: 50%;
+    }
+
+    /* ================= CONTAINER ================= */
+
+    .container {
+      max-width: 1400px;
+      margin: auto;
+      padding: 25px;
+    }
+
+    /* ================= CARDS ================= */
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+      margin-bottom: 25px;
+    }
+
+    .card {
+      background: white;
+      padding: 22px;
+      border-radius: 14px;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+    }
+
+    .card-title {
+      font-size: 14px;
+      color: #64748b;
+      margin-bottom: 8px;
+    }
+
+    .card-value {
+      font-size: 30px;
+      font-weight: bold;
+      color: #111827;
+    }
+
+    /* ================= TOOLBAR ================= */
+
+    .toolbar {
+      background: white;
+      padding: 18px;
+      border-radius: 14px;
+      margin-bottom: 20px;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    input,
+    select,
+    button {
+      padding: 11px 14px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 14px;
+    }
+
+    input {
+      min-width: 220px;
+    }
+
+    button {
+      background: #111827;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #374151;
+    }
+
+    /* ================= TABLE ================= */
+
+    .table-container {
+      background: white;
+      border-radius: 14px;
+      overflow-x: auto;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 850px;
+    }
+
+    th {
+      background: #111827;
+      color: white;
+      padding: 15px;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    td {
+      padding: 14px 15px;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 14px;
+    }
+
+    tr:hover {
+      background: #f8fafc;
+    }
+
+    .present {
+      background: #dcfce7;
+      color: #166534;
+      padding: 6px 10px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 12px;
+    }
+
+    .absent {
+      background: #fee2e2;
+      color: #991b1b;
+      padding: 6px 10px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 12px;
+    }
+
+    .uid {
+      font-family: monospace;
+      font-weight: bold;
+    }
+
+    /* ================= EMPTY ================= */
+
+    .empty {
+      text-align: center;
+      padding: 50px;
+      color: #64748b;
+    }
+
+    /* ================= MOBILE ================= */
+
+    @media(max-width: 900px) {
+
+      .cards {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+      }
+    }
+
+    @media(max-width: 550px) {
+
+      .cards {
+        grid-template-columns: 1fr;
+      }
+
+      .container {
+        padding: 15px;
+      }
+
+      .toolbar {
+        flex-direction: column;
+      }
+
+      input,
+      select,
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- ================= HEADER ================= -->
+
+<header>
+
+  <div>
+    <div class="logo">
+      RFID Attendance System
+    </div>
+
+    <div class="subtitle">
+      ESP32 + RC522 + Firebase Realtime Database
+    </div>
+  </div>
+
+  <div class="firebase-status">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="firebaseStatus">
+      Connecting Firebase...
+    </span>
+  </div>
+
+</header>
+
+
+<!-- ================= MAIN ================= -->
+
+<div class="container">
+
+  <!-- ================= SUMMARY CARDS ================= -->
+
+  <div class="cards">
+
+    <div class="card">
+
+      <div class="card-title">
+        Total Records
+      </div>
+
+      <div class="card-value" id="totalRecords">
+        0
+      </div>
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="card-title">
+        Present Today
+      </div>
+
+      <div class="card-value" id="presentToday">
+        0
+      </div>
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="card-title">
+        Students
+      </div>
+
+      <div class="card-value" id="totalStudents">
+        4
+      </div>
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="card-title">
+        Last Scan
+      </div>
+
+      <div class="card-value" id="lastScan">
+        --
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- ================= FILTER ================= -->
+
+  <div class="toolbar">
+
+    <input
+      type="text"
+      id="search"
+      placeholder="Search name, roll number or UID..."
+    >
+
+    <input
+      type="date"
+      id="dateFilter"
+    >
+
+    <select id="statusFilter">
+
+      <option value="all">
+        All Status
+      </option>
+
+      <option value="Present">
+        Present
+      </option>
+
+      <option value="Absent">
+        Absent
+      </option>
+
+    </select>
+
+    <button onclick="clearFilters()">
+      Clear Filters
+    </button>
+
+  </div>
+
+
+  <!-- ================= TABLE ================= -->
+
+  <div class="table-container">
+
+    <table>
+
+      <thead>
+
+        <tr>
+
+          <th>#</th>
+
+          <th>Date</th>
+
+          <th>Time</th>
+
+          <th>Roll No.</th>
+
+          <th>Name</th>
+
+          <th>RFID UID</th>
+
+          <th>Status</th>
+
+        </tr>
+
+      </thead>
+
+      <tbody id="attendanceTable">
+
+        <tr>
+
+          <td colspan="7" class="empty">
+
+            Waiting for attendance data...
+
+          </td>
+
+        </tr>
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+</div>
+
+
+<!-- ================= FIREBASE ================= -->
+
+<script type="module">
+
+  import {
+    initializeApp
+  } from
+  "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+
+
+  import {
+    getDatabase,
+    ref,
+    onValue
+  } from
+  "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
+
+
+  /* =========================================
+     FIREBASE CONFIGURATION
+  ========================================= */
+
+  const firebaseConfig = {
+
+    apiKey:
+      "AIzaSyAkyoQwZuEw67JTjD-5dDrWwgNgsD0igY",
+
+    authDomain:
+      "attendance-system-b93a6.firebaseapp.com",
+
+    databaseURL:
+      "https://attendance-system-b93a6-default-rtdb.asia-southeast1.firebasedatabase.app",
+
+    projectId:
+      "attendance-system-b93a6",
+
+    storageBucket:
+      "attendance-system-b93a6.firebasestorage.app",
+
+    messagingSenderId:
+      "1012803960053",
+
+    appId:
+      "1:1012803960053:web:9a0b5fc49803bf2158d9bc"
+  };
+
+
+  /* =========================================
+     INITIALIZE FIREBASE
+  ========================================= */
+
+  const app =
+    initializeApp(firebaseConfig);
+
+
+  const database =
+    getDatabase(app);
+
+
+  console.log("Firebase initialized");
+
+
+  /* =========================================
+     FIREBASE STATUS
+  ========================================= */
+
+  document.getElementById(
+    "firebaseStatus"
+  ).innerText =
+    "Firebase Connected";
+
+
+  /* =========================================
+     ATTENDANCE REFERENCE
+  ========================================= */
+
+  const attendanceRef =
+    ref(database, "attendance");
+
+
+  /* =========================================
+     LIVE DATABASE LISTENER
+  ========================================= */
+
+  onValue(
+    attendanceRef,
+
+    (snapshot) => {
+
+      const data =
+        snapshot.val();
+
+      let records = [];
+
+
+      if (data) {
+
+        Object.keys(data).forEach(
+          key => {
+
+            records.push({
+
+              id: key,
+
+              ...data[key]
+
+            });
+
+          }
+        );
+
+      }
+
+
+      /* Newest first */
+
+      records.reverse();
+
+
+      window.allRecords =
+        records;
+
+
+      updateDashboard(records);
+
+      displayRecords(records);
+
+    },
+
+    (error) => {
+
+      console.error(
+        "Firebase Error:",
+        error
+      );
+
+      document.getElementById(
+        "firebaseStatus"
+      ).innerText =
+        "Firebase Error";
+
+    }
+  );
+
+
+  /* =========================================
+     UPDATE DASHBOARD
+  ========================================= */
+
+  function updateDashboard(records) {
+
+    document.getElementById(
+      "totalRecords"
+    ).innerText =
+      records.length;
+
+
+    const today =
+      new Date();
+
+
+    const day =
+      String(
+        today.getDate()
+      ).padStart(2, "0");
+
+
+    const month =
+      String(
+        today.getMonth() + 1
+      ).padStart(2, "0");
+
+
+    const year =
+      today.getFullYear();
+
+
+    const todayString =
+      `${day}-${month}-${year}`;
+
+
+    const todayRecords =
+      records.filter(
+        r => r.date === todayString
+      );
+
+
+    document.getElementById(
+      "presentToday"
+    ).innerText =
+      todayRecords.length;
+
+
+    if (records.length > 0) {
+
+      document.getElementById(
+        "lastScan"
+      ).innerText =
+        records[0].time || "--";
+
+    } else {
+
+      document.getElementById(
+        "lastScan"
+      ).innerText =
+        "--";
+
+    }
+
+  }
+
+
+  /* =========================================
+     DISPLAY RECORDS
+  ========================================= */
+
+  function displayRecords(records) {
+
+    const search =
+      document.getElementById(
+        "search"
+      ).value
+      .toLowerCase();
+
+
+    const dateFilter =
+      document.getElementById(
+        "dateFilter"
+      ).value;
+
+
+    const statusFilter =
+      document.getElementById(
+        "statusFilter"
+      ).value;
+
+
+    let filtered =
+      records.filter(
+        record => {
+
+          const searchMatch =
+
+            !search ||
+
+            String(
+              record.name || ""
+            )
+            .toLowerCase()
+            .includes(search)
+
+            ||
+
+            String(
+              record.rollNo || ""
+            )
+            .toLowerCase()
+            .includes(search)
+
+            ||
+
+            String(
+              record.uid || ""
+            )
+            .toLowerCase()
+            .includes(search);
+
+
+          let dateMatch = true;
+
+
+          if (dateFilter) {
+
+            const parts =
+              dateFilter.split("-");
+
+
+            const wantedDate =
+              `${parts[2]}-${parts[1]}-${parts[0]}`;
+
+
+            dateMatch =
+              record.date === wantedDate;
+
+          }
+
+
+          const statusMatch =
+
+            statusFilter === "all" ||
+
+            record.status ===
+              statusFilter;
+
+
+          return (
+            searchMatch &&
+            dateMatch &&
+            statusMatch
+          );
+
+        }
+      );
+
+
+    const table =
+      document.getElementById(
+        "attendanceTable"
+      );
+
+
+    if (filtered.length === 0) {
+
+      table.innerHTML = `
+
+        <tr>
+
+          <td
+            colspan="7"
+            class="empty"
+          >
+
+            No attendance records found.
+
+          </td>
+
+        </tr>
+
+      `;
+
+      return;
+
+    }
+
+
+    table.innerHTML = "";
+
+
+    filtered.forEach(
+      (record, index) => {
+
+        const row =
+          document.createElement(
+            "tr"
+          );
+
+
+        const statusClass =
+          record.status ===
+          "Present"
+            ? "present"
+            : "absent";
+
+
+        row.innerHTML = `
+
+          <td>
+            ${index + 1}
+          </td>
+
+          <td>
+            ${record.date || "--"}
+          </td>
+
+          <td>
+            ${record.time || "--"}
+          </td>
+
+          <td>
+            <strong>
+              ${record.rollNo || "--"}
+            </strong>
+          </td>
+
+          <td>
+            ${record.name || "Unknown"}
+          </td>
+
+          <td class="uid">
+            ${record.uid || "--"}
+          </td>
+
+          <td>
+
+            <span
+              class="${statusClass}"
+            >
+
+              ${record.status || "--"}
+
+            </span>
+
+          </td>
+
+        `;
+
+
+        table.appendChild(row);
+
+      }
+    );
+
+  }
+
+
+  /* =========================================
+     SEARCH
+  ========================================= */
+
+  document.getElementById(
+    "search"
+  ).addEventListener(
+    "input",
+    () => {
+
+      displayRecords(
+        window.allRecords || []
+      );
+
+    }
+  );
+
+
+  /* =========================================
+     DATE FILTER
+  ========================================= */
+
+  document.getElementById(
+    "dateFilter"
+  ).addEventListener(
+    "change",
+    () => {
+
+      displayRecords(
+        window.allRecords || []
+      );
+
+    }
+  );
+
+
+  /* =========================================
+     STATUS FILTER
+  ========================================= */
+
+  document.getElementById(
+    "statusFilter"
+  ).addEventListener(
+    "change",
+    () => {
+
+      displayRecords(
+        window.allRecords || []
+      );
+
+    }
+  );
+
+
+  /* =========================================
+     CLEAR FILTERS
+  ========================================= */
+
+  window.clearFilters =
+    function() {
+
+      document.getElementById(
+        "search"
+      ).value = "";
+
+
+      document.getElementById(
+        "dateFilter"
+      ).value = "";
+
+
+      document.getElementById(
+        "statusFilter"
+      ).value = "all";
+
+
+      displayRecords(
+        window.allRecords || []
+      );
+
+    };
+
+</script>
+
+</body>
+</html>
+```
+
+### Firebase data expected by this HTML
+
+The ESP32 code I gave you creates:
+
+```text
+attendance
+ └── generated-id
+      ├── uid: "34:51:C8:05"
+      ├── rollNo: "EEE001"
+      ├── name: "Arun Kumar"
+      ├── date: "20-09-2026"
+      ├── time: "09:15:32"
+      └── status: "Present"
+```
+
+The dashboard will automatically update when the ESP32 scans a card—**no page refresh is required**.
+
+### Important Firebase rule
+
+If you enabled **Anonymous Authentication** as in the ESP32 code, your Realtime Database rules should allow authenticated users:
+
+```json
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null"
+  }
+}
+```
+
+For a production attendance system, we can make the rules more restrictive so that the dashboard can read attendance while arbitrary clients cannot write attendance records.
+
+**Next improvement:** I can make this into a more professional attendance dashboard with **student registration, Present/Absent calculation, attendance percentage, daily/monthly filter, charts, Excel/CSV export, and a separate RFID card registration page**.
