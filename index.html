@@ -1001,4 +1001,151 @@
         .stats-row { grid-template-columns: 1fr 1fr; gap: 0.7rem; }
         .stat-card { padding: 1rem; }
         .stat-value { font-size: 1.6rem; }
-        .stat-icon { width: 2.5rem; height: 2.5rem; font-size: 1
+        .stat-icon { width: 2.5rem; height: 2.5rem; font-size: 1.1rem; }
+        .toolbar { flex-direction: column; align-items: stretch; }
+        .search-box { min-width: 100%; }
+        table { font-size: 0.8rem; min-width: 700px; }
+        th, td { padding: 0.7rem 0.8rem; }
+        #toastContainer { top: 0.8rem; right: 0.8rem; left: 0.8rem; max-width: none; }
+    }
+
+    @media (max-width: 480px) {
+        .stats-row { grid-template-columns: 1fr; }
+    }
+</style>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- ===== HEADER ===== -->
+        <div class="header">
+            <div class="brand">
+                <div class="brand-icon"><i class="fas fa-id-card"></i></div>
+                <div>
+                    <h1>RFID Attendance</h1>
+                    <div class="subhead">ESP32 • Firebase • Real-time Dashboard</div>
+                </div>
+            </div>
+
+            <div class="header-controls">
+                <div class="live-indicator">
+                    <span class="dot"></span> LIVE
+                </div>
+                <div class="clock-widget">
+                    <div class="clock-time" id="liveClock">--:--:--</div>
+                    <div class="clock-date" id="liveDate">Loading...</div>
+                </div>
+                <button class="icon-btn" id="soundToggle" title="Toggle Sound">
+                    <i class="fas fa-volume-up"></i>
+                </button>
+                <button class="icon-btn" id="refreshBtn" title="Refresh">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+                <button class="icon-btn" id="themeToggle" title="Toggle Theme">
+                    <i class="fas fa-moon"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- ===== STATS ===== -->
+        <div class="stats-row">
+            <div class="stat-card total">
+                <div>
+                    <div class="stat-label">Total Students</div>
+                    <div class="stat-value" id="totalStudents">—</div>
+                </div>
+                <div class="stat-icon"><i class="fas fa-users"></i></div>
+            </div>
+            <div class="stat-card present">
+                <div>
+                    <div class="stat-label">Present</div>
+                    <div class="stat-value" id="presentCount">—</div>
+                </div>
+                <div class="stat-icon present"><i class="fas fa-check-circle"></i></div>
+            </div>
+            <div class="stat-card leave">
+                <div>
+                    <div class="stat-label">On Leave</div>
+                    <div class="stat-value" id="leaveCount">—</div>
+                </div>
+                <div class="stat-icon leave"><i class="fas fa-clock"></i></div>
+            </div>
+        </div>
+
+        <!-- ===== CHART ===== -->
+        <div class="chart-section">
+            <div class="chart-card">
+                <h3><i class="fas fa-chart-pie"></i> Status Overview</h3>
+                <div class="chart-container">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card" style="display:flex;flex-direction:column;justify-content:center;gap:0.8rem;">
+                <h3><i class="fas fa-bolt"></i> Quick Tips</h3>
+                <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.7;">
+                    <div>🎯 Scan RFID card on ESP32 to mark attendance</div>
+                    <div>🔄 Toggle between <b style="color:var(--success)">PRESENT</b> and <b style="color:var(--warning)">LEAVE</b></div>
+                    <div>🔔 Real-time notifications appear on each scan</div>
+                    <div>📥 Export records anytime using the CSV button</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TOOLBAR ===== -->
+        <div class="toolbar">
+            <div class="search-box">
+                <i class="fas fa-search"></i>
+                <input type="text" id="searchInput" placeholder="Search by name, ID, or UID...">
+            </div>
+            <select class="filter-select" id="filterSelect">
+                <option value="all">All Status</option>
+                <option value="PRESENT">Present</option>
+                <option value="LEAVE">On Leave</option>
+            </select>
+            <button class="btn btn-primary" id="exportBtn">
+                <i class="fas fa-download"></i> Export CSV
+            </button>
+        </div>
+
+        <!-- ===== TABLE ===== -->
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>RFID UID</th>
+                        <th>Date</th>
+                        <th>Time</th>
+                        <th>Day</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="studentTableBody"></tbody>
+            </table>
+            <div id="emptyState">
+                <i class="fas fa-inbox"></i>
+                <h3>No Records Found</h3>
+                <p>Scan an RFID card on the ESP32 to add attendance</p>
+            </div>
+            <div id="loadingIndicator">
+                <i class="fas fa-spinner fa-pulse"></i> Connecting to Firebase...
+            </div>
+        </div>
+
+        <!-- ===== FOOTER ===== -->
+        <div class="footer">
+            <div class="footer-info">
+                <i class="fas fa-database"></i>
+                <span>Firebase Realtime DB</span>
+                <span>•</span>
+                <span>ESP32 RFID System</span>
+            </div>
+            <div class="footer-badge">
+                <i class="fas fa-sync-alt"></i> Last updated: <span id="lastUpdated">—</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toastContainer"></div>
+</body>
+</html>
